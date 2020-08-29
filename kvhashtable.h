@@ -80,6 +80,7 @@ KVHaskTableEntry* KVHashTable_Insert(KVHashTable* ht, KVHaskTableEntry* ToBeInse
 KVHaskTableEntry* KVHashTable_Find(KVHashTable* ht, long hash, void* FindArg);
 KVHaskTableEntry* KVHashTable_RemoveNode(KVHashTable* ht, long Hash, KVHaskTableEntry* ToBeRemoved);
 KVHaskTableEntry* KVHashTable_GetOrNewEntry(KVHashTable* ht, void* CheckFuncArg);
+KVHaskTableEntry* KVHaskTableEntry_GetEntry(KVHashTable* ht, int Index_InEntrySize);
 void KVHashTable_GiveBackEntry(KVHashTable* ht, KVHaskTableEntry* entry);
 void KVHashTable_Free(KVHashTable* List);
 

@@ -32,7 +32,7 @@ int ForeachCallback(const char* Key, const char* Val)
 int main(void)
 {
 	// Open or create FileKV from file.
-	FileKV* kv = NewFileKV(_T("C:\\Users\\YourName\\Desktop\\kv.txt"), SimpleHash);
+	FileKV* kv = NewFileKV(_T("x64\\kv.txt"), SimpleHash);
 
 	// Add
 	FileKV_Put(kv, "LjoqfuUI5Txaz", "iLsXu8iAM6cOOAAY");

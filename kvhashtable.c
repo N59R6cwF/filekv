@@ -99,7 +99,7 @@ KVHashTable* NewKVHashTable(
 	return Placeholder;
 }
 
-/* private */ KVHaskTableEntry* GetEntry(KVHashTable* ht, int Index_InEntrySize)
+KVHaskTableEntry* KVHaskTableEntry_GetEntry(KVHashTable* ht, int Index_InEntrySize)
 {
 	if (ht == NULL || !ValidIndex_InEntrySize(ht, Index_InEntrySize))
 	{
@@ -118,7 +118,7 @@ KVHashTable* NewKVHashTable(
 		return NULL;
 	}
 
-	return GetEntry(List, This->Next_InEntrySize);
+	return KVHaskTableEntry_GetEntry(List, This->Next_InEntrySize);
 }
 
 /* private */ KVHaskTableEntry* Insert(KVHashTable* ht, KVHashTableSlot* slot, KVHaskTableEntry* ToBeInserted_StrayEntry, int NoExpand)
@@ -152,7 +152,7 @@ KVHashTable* NewKVHashTable(
 	return ToBeInserted_StrayEntry;
 }
 
-/* private */ KVHaskTableEntry* HashTable_InsertInner(KVHashTable* ht, KVHaskTableEntry* ToBeInserted_StrayEntry, long Hash, int NoExpand)
+/* private */ KVHaskTableEntry* KVHashTable_InsertInner(KVHashTable* ht, KVHaskTableEntry* ToBeInserted_StrayEntry, long Hash, int NoExpand)
 {
 	ToBeInserted_StrayEntry->Hash = Hash;
 	return Insert(ht, CalcSlotOfHash(ht, Hash), ToBeInserted_StrayEntry, NoExpand);
@@ -160,7 +160,7 @@ KVHashTable* NewKVHashTable(
 
 KVHaskTableEntry* KVHashTable_Insert(KVHashTable* ht, KVHaskTableEntry* ToBeInserted_StrayEntry, long Hash)
 {
-	return HashTable_InsertInner(ht, ToBeInserted_StrayEntry, Hash, 0 != 0);
+	return KVHashTable_InsertInner(ht, ToBeInserted_StrayEntry, Hash, 0 != 0);
 }
 
 /* private */ KVHaskTableEntry* ForeachInSlot(
@@ -182,7 +182,7 @@ KVHaskTableEntry* KVHashTable_Insert(KVHashTable* ht, KVHaskTableEntry* ToBeInse
 	}
 
 	KVHaskTableEntry* Previous = NULL;
-	KVHaskTableEntry* This = GetEntry(ht, slot->Next_InEntrySize);
+	KVHaskTableEntry* This = KVHaskTableEntry_GetEntry(ht, slot->Next_InEntrySize);
 	do
 	{
 		int r = Callback(ht, slot, Previous, This, CallbackArg);
@@ -370,7 +370,7 @@ KVHaskTableEntry* KVHashTable_GetOrNewEntry(KVHashTable* ht, void* CheckFuncArg)
 	{
 		if (!(e->IsInFreeList))
 		{
-			HashTable_InsertInner(ht, e, e->Hash, 0 == 0);
+			KVHashTable_InsertInner(ht, e, e->Hash, 0 == 0);
 		}
 	}
 }

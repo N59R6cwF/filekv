@@ -28,6 +28,7 @@ const char* FileKV_Find(FileKV* fkv, const char* key);
 int FileKV_Put(FileKV* fkv, const char* key, const char* val);
 int FileKV_Remove(FileKV* fkv, const char* key);
 void FileKV_Foreach(FileKV* fkv, ForeachKVCallback callback);
+void FileKV_Flush(FileKV* fkv);
 void FileKV_Free(FileKV* fkv);
 
 

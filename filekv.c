@@ -12,6 +12,8 @@ typedef struct {
 
 	KVHashTable IndexTable;
 
+	unsigned int State;
+
 	long long int _Tail;
 } Header;
 
@@ -27,6 +29,11 @@ typedef struct {
 #define INDEX_FILE_SUFFIX (_T(".index"))
 #define INDEX_FILE_SUFFIX_LENGTH ((_tcsclen(INDEX_FILE_SUFFIX) + 1) * sizeof(_TCHAR))
 
+#define STATE_DEFAULT 0
+#define STATE_INDEX_EXPANDING 1
+#define STATE_DATA_EXPANDING 2
+
+
 typedef struct {
 	FileKV* fkv;
 	const char* Key;
@@ -40,7 +47,7 @@ typedef struct {
 		e->Position_InBytes >= 0 &&
 		e->Position_InBytes <= (h->DataLength_IncludingFreeEntry) &&
 
-		e->Capacity_InBytes >= 0 &&
+		e->Capacity_InBytes > 0 &&
 		e->Capacity_InBytes + e->Position_InBytes <= (h->DataLength_IncludingFreeEntry) &&
 
 		e->KVLength_InBytes > 0 &&
@@ -51,15 +58,15 @@ typedef struct {
 	}
 
 	const char* KeyStart = fkv->DataMapping->MappingStart + e->Position_InBytes;
-	int KeyLen_WithoutTerminal = strnlen(KeyStart, e->KVLength_InBytes);
-	if (KeyLen_WithoutTerminal == e->KVLength_InBytes)
+	size_t KeyLen_WithoutTerminal = strnlen(KeyStart, e->KVLength_InBytes);
+	if (KeyLen_WithoutTerminal >= e->KVLength_InBytes)
 	{
 		return 0 != 0;
 	}
 
-	const char* ValStart = KeyStart + (KeyLen_WithoutTerminal + 1);
-	int ValMaxLen = e->KVLength_InBytes - (KeyLen_WithoutTerminal + 1);
-	int ValLen_WithoutTerminal = strnlen(ValStart, ValMaxLen);
+	const char* ValStart = KeyStart + KeyLen_WithoutTerminal + 1;
+	size_t ValMaxLen = e->KVLength_InBytes - (KeyLen_WithoutTerminal + 1);
+	size_t ValLen_WithoutTerminal = strnlen(ValStart, ValMaxLen);
 	if (ValLen_WithoutTerminal == ValMaxLen)
 	{
 		return 0 != 0;
@@ -107,6 +114,8 @@ typedef struct {
 
 	if (fkv->IndexMapping->MappingSize - h->IndexLength_IncludingHeader < Added)
 	{
+		h->State = STATE_INDEX_EXPANDING;
+
 		int BytesToExpand = ROUND_UP(
 			Added - (fkv->IndexMapping->MappingSize - h->IndexLength_IncludingHeader),
 			512
@@ -114,8 +123,11 @@ typedef struct {
 
 		if (KVFileMapping_Expand(fkv->IndexMapping, BytesToExpand) != 0)
 		{
+			h->State = STATE_DEFAULT;
 			return NULL;
 		}
+
+		h = GET_HEADER(fkv); // In case it got remapped to an new address
 
 		KVHashTable_ReFix(
 			fkv->IndexTable,
@@ -124,10 +136,13 @@ typedef struct {
 			FreeEntryChecker,
 			Equal
 		);
+
+		h->State = STATE_DATA_EXPANDING;
 	}
 
 	char* Here = fkv->IndexMapping->MappingStart + (h->IndexLength_IncludingHeader);
 	h->IndexLength_IncludingHeader += Added;
+
 	return Here;
 }
 
@@ -171,17 +186,12 @@ FileKV* NewFileKV(const _TCHAR* file, HashFunc hash)
 	Header* h = GET_HEADER(New);
 	New->IndexTable = &(h->IndexTable);
 
-	if (h->IndexLength_IncludingHeader > New->IndexMapping->MappingSize)
-	{
-		FileKV_Free(New);
-		return NULL;
-	}
-
 	if (New->IndexMapping->FileIsNewlyCreated)
 	{
 		h->Version = FILEKV_VERSION;
 		h->IndexLength_IncludingHeader = MinIndexLength;
 		h->DataLength_IncludingFreeEntry = 0;
+		h->State = STATE_DEFAULT;
 		h->_Tail = 0xABABABABABABABAB;
 
 		if (NewKVHashTable(
@@ -199,6 +209,12 @@ FileKV* NewFileKV(const _TCHAR* file, HashFunc hash)
 	}
 	else
 	{
+		if (h->State != STATE_DEFAULT || h->IndexLength_IncludingHeader > New->IndexMapping->MappingSize)
+		{
+			FileKV_Free(New);
+			return NULL;
+		}
+
 		if (KVHashTable_ReFix(
 			New->IndexTable,
 			((char*)h) + HEADER_SIZE, /* Don't just be (h + 1) */
@@ -211,7 +227,7 @@ FileKV* NewFileKV(const _TCHAR* file, HashFunc hash)
 			return NULL;
 		}
 
-		New->DataMapping = NewKVFileMapping(file, 0);
+		New->DataMapping = NewKVFileMapping(file, 512);
 		if (New->DataMapping == NULL)
 		{
 			FileKV_Free(New);
@@ -223,6 +239,21 @@ FileKV* NewFileKV(const _TCHAR* file, HashFunc hash)
 			FileKV_Free(New);
 			return NULL;
 		}
+
+		if (New->IndexTable->EntryCount_IncludingFreeAndStray > 0)
+		{
+			KVHaskTableEntry* LastEntry =
+				KVHaskTableEntry_GetEntry(
+					New->IndexTable,
+					New->IndexTable->EntryCount_IncludingFreeAndStray - 1
+				);
+
+			if (LastEntry == NULL || !IsEntryValid(New, LastEntry))
+			{
+				FileKV_Free(New);
+				return NULL;
+			}
+		}
 	}
 
 	New->DataPath = _tcsdup(file);
@@ -231,7 +262,6 @@ FileKV* NewFileKV(const _TCHAR* file, HashFunc hash)
 		FileKV_Free(New);
 		return NULL;
 	}
-
 
 	return New;
 }
@@ -259,7 +289,7 @@ const char* FileKV_Find(FileKV* fkv, const char* key)
 	}
 
 	const char* EntryStart = fkv->DataMapping->MappingStart + e->Position_InBytes;
-	int KeyLength = strlen(EntryStart) + 1;
+	size_t KeyLength = strlen(EntryStart) + 1;
 	const char* DataStart = EntryStart + KeyLength;
 
 	return DataStart;
@@ -319,8 +349,8 @@ const char* FileKV_Find(FileKV* fkv, const char* key)
 int FileKV_Put(FileKV* fkv, const char* key, const char* val)
 {
 	long hash = (fkv->hash)(key);
-	unsigned int ValSize = strlen(val) + 1;
-	unsigned int KeySize = strlen(key) + 1;
+	size_t ValSize = strlen(val) + 1;
+	size_t KeySize = strlen(key) + 1;
 
 	KVHaskTableEntry* past = FileKV_FindEntryWithHash(fkv, key, hash);
 	if (past != NULL)
@@ -349,17 +379,21 @@ int FileKV_Put(FileKV* fkv, const char* key, const char* val)
 
 	if (KV_ENTRY_IS_NEWLY_CREATED(e))
 	{
+		Header* h = GET_HEADER(fkv);
 		int Capacity = ROUND_UP(KeySize + ValSize, 8);
 		Here = ExpandDataZone(fkv, Capacity);
 		if (Here == NULL)
 		{
 			// TODO: Deal with no disk space error
 			KVHashTable_GiveBackEntry(fkv->IndexTable, e);
+			h->State = STATE_DEFAULT;
 			return -188;
 		}
 
 		e->Capacity_InBytes = Capacity;
 		e->Position_InBytes = Here - fkv->DataMapping->MappingStart;
+
+		h->State = STATE_DEFAULT;
 	}
 	else
 	{
@@ -423,6 +457,12 @@ void FileKV_Foreach(FileKV* fkv, ForeachKVCallback callback)
 	Helper.fkv = fkv;
 
 	KVHashTable_Foreach(fkv->IndexTable, ForeachKVHelperCallback, &Helper);
+}
+
+void FileKV_Flush(FileKV* fkv)
+{
+	KVFileMapping_Flush(fkv->IndexMapping);
+	if (fkv->DataMapping != NULL) KVFileMapping_Flush(fkv->DataMapping);
 }
 
 void FileKV_Free(FileKV* fkv)
